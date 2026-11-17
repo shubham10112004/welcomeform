@@ -242,6 +242,7 @@ h1{font:700 clamp(1.6rem,6.5vw,2rem)/1.15 var(--font-display);margin:0;text-wrap
           <p class="lead" style="margin:0">Our team will verify your details and get in touch.</p>
           <p style="margin:0">Reference: <span class="ref" id="refId"></span></p>
           <p class="notice" id="demoNotice" hidden>Preview mode: Supabase isn't connected yet, so nothing was saved.</p>
+          <p class="hint" style="margin:0">Form version 3</p>
         </div>
       </section>
     </form>
@@ -283,7 +284,6 @@ h1{font:700 clamp(1.6rem,6.5vw,2rem)/1.15 var(--font-display);margin:0;text-wrap
   <input type="file" class="sr in-file" accept="image/*,application/pdf" tabindex="-1" aria-hidden="true">
 </template>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
 <script>
 /* =========================================================
    SUPABASE SETTINGS — fill these two values to go live.
@@ -497,7 +497,7 @@ const CONFIG = {
   /* ---------- Submit ---------- */
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() :
     "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); }));
-  const live = () => CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY && window.supabase;
+  const live = () => !!(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY);
 
   async function submit(){
     if (sending) return;
@@ -515,20 +515,26 @@ const CONFIG = {
     const colFor = { aadhaarFront: "aadhaar_front_path", aadhaarBack: "aadhaar_back_path", gstCert: "gst_certificate_path", panCard: "pan_card_path" };
     try {
       if (live()) {
-        const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+        const base = CONFIG.SUPABASE_URL.replace(/\/+$/, "");
+        const auth = { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: "Bearer " + CONFIG.SUPABASE_ANON_KEY };
+        const why = async r => { try { const j = await r.json(); return j.message || j.error || j.msg || r.status; } catch (_) { return r.status; } };
         const keys = Object.keys(files);
         for (let n = 0; n < keys.length; n++) {
           const k = keys[n], f = files[k];
           nb.textContent = `Uploading ${n + 1} of ${keys.length}…`;
           const ext = f.type === "application/pdf" ? "pdf" : (f.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
           const path = `${id}/${k}.${ext}`;
-          const { error } = await sb.storage.from(CONFIG.BUCKET).upload(path, f, { contentType: f.type, upsert: false });
-          if (error) throw new Error(`Couldn't upload ${slotTitles[k]}: ${error.message}`);
+          const r = await fetch(`${base}/storage/v1/object/${CONFIG.BUCKET}/${path}`, {
+            method: "POST", headers: { ...auth, "Content-Type": f.type || "application/octet-stream", "x-upsert": "false" }, body: f
+          });
+          if (!r.ok) throw new Error(`Couldn't upload ${slotTitles[k]} (${await why(r)}).`);
           row[colFor[k]] = path;
         }
         nb.textContent = "Saving…";
-        const { error } = await sb.from(CONFIG.TABLE).insert(row);
-        if (error) throw new Error(`Couldn't save your details: ${error.message}`);
+        const r = await fetch(`${base}/rest/v1/${CONFIG.TABLE}`, {
+          method: "POST", headers: { ...auth, "Content-Type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify(row)
+        });
+        if (!r.ok) throw new Error(`Couldn't save your details (${await why(r)}).`);
       } else {
         nb.textContent = "Sending…";
         await new Promise(r => setTimeout(r, 900));
